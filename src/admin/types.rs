@@ -78,7 +78,7 @@ pub struct CredentialStatusItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit_summary: Option<RateLimitSummary>,
     /// 当前最紧张的前两条限流窗口摘要
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(default)]
     pub rate_limit_summaries: Vec<RateLimitSummary>,
 }
 
