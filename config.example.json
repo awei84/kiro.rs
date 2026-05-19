@@ -5,5 +5,15 @@
   "tlsBackend": "rustls",
   "region": "us-east-1",
   "adminApiKey": "sk-admin-your-secret-key",
+  "defaultRateLimits": [
+    {
+      "window": "5m",
+      "maxRequests": 100
+    },
+    {
+      "window": "24h",
+      "maxRequests": 3000
+    }
+  ],
   "defaultEndpoint": "ide"
 }

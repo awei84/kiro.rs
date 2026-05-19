@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2 } from 'lucide-react'
+import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2, Gauge } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { storage } from '@/lib/storage'
@@ -12,7 +12,8 @@ import { AddCredentialDialog } from '@/components/add-credential-dialog'
 import { BatchImportDialog } from '@/components/batch-import-dialog'
 import { KamImportDialog } from '@/components/kam-import-dialog'
 import { BatchVerifyDialog, type VerifyResult } from '@/components/batch-verify-dialog'
-import { useCredentials, useDeleteCredential, useResetFailure, useLoadBalancingMode, useSetLoadBalancingMode } from '@/hooks/use-credentials'
+import { RateLimitDialog } from '@/components/rate-limit-dialog'
+import { useCredentials, useDeleteCredential, useResetFailure, useLoadBalancingMode, useSetLoadBalancingMode, useDefaultRateLimits, useSetDefaultRateLimits } from '@/hooks/use-credentials'
 import { getCredentialBalance, forceRefreshToken } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
 import type { BalanceResponse } from '@/types/api'
@@ -29,6 +30,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [kamImportDialogOpen, setKamImportDialogOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
+  const [defaultRateLimitDialogOpen, setDefaultRateLimitDialogOpen] = useState(false)
   const [verifying, setVerifying] = useState(false)
   const [verifyProgress, setVerifyProgress] = useState({ current: 0, total: 0 })
   const [verifyResults, setVerifyResults] = useState<Map<number, VerifyResult>>(new Map())
@@ -54,6 +56,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const { mutate: resetFailure } = useResetFailure()
   const { data: loadBalancingData, isLoading: isLoadingMode } = useLoadBalancingMode()
   const { mutate: setLoadBalancingMode, isPending: isSettingMode } = useSetLoadBalancingMode()
+  const { data: defaultRateLimitsData } = useDefaultRateLimits()
+  const { mutate: setDefaultRateLimits, isPending: isSettingDefaultRateLimits } = useSetDefaultRateLimits()
 
   // 计算分页
   const totalPages = Math.ceil((data?.credentials.length || 0) / itemsPerPage)
@@ -507,6 +511,18 @@ export function Dashboard({ onLogout }: DashboardProps) {
     })
   }
 
+  const handleSaveDefaultRateLimits = (rules?: { window: string; maxRequests: number }[]) => {
+    setDefaultRateLimits(rules, {
+      onSuccess: () => {
+        toast.success('全局默认限流规则已更新')
+        setDefaultRateLimitDialogOpen(false)
+      },
+      onError: (error) => {
+        toast.error(`保存失败: ${extractErrorMessage(error)}`)
+      }
+    })
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -553,6 +569,15 @@ export function Dashboard({ onLogout }: DashboardProps) {
               title="切换负载均衡模式"
             >
               {isLoadingMode ? '加载中...' : (loadBalancingData?.mode === 'priority' ? '优先级模式' : '均衡负载')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDefaultRateLimitDialogOpen(true)}
+              title="设置全局默认限流规则"
+            >
+              <Gauge className="h-4 w-4 mr-1" />
+              默认限流
             </Button>
             <Button variant="ghost" size="icon" onClick={toggleDarkMode}>
               {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
@@ -780,6 +805,16 @@ export function Dashboard({ onLogout }: DashboardProps) {
         progress={verifyProgress}
         results={verifyResults}
         onCancel={handleCancelVerify}
+      />
+
+      <RateLimitDialog
+        open={defaultRateLimitDialogOpen}
+        onOpenChange={setDefaultRateLimitDialogOpen}
+        title="全局默认限流规则"
+        description="未配置凭据级限流的凭据会使用这组默认规则；留空保存可清空全局默认规则。"
+        initialRules={defaultRateLimitsData?.defaultRateLimits}
+        loading={isSettingDefaultRateLimits}
+        onSave={handleSaveDefaultRateLimits}
       />
     </div>
   )

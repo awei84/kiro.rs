@@ -14,7 +14,8 @@ use crate::kiro::token_manager::MultiTokenManager;
 use super::error::AdminServiceError;
 use super::types::{
     AddCredentialRequest, AddCredentialResponse, BalanceResponse, CredentialStatusItem,
-    CredentialsStatusResponse, LoadBalancingModeResponse, SetLoadBalancingModeRequest,
+    CredentialsStatusResponse, DefaultRateLimitsResponse, LoadBalancingModeResponse,
+    RateLimitSummary, SetLoadBalancingModeRequest,
 };
 
 /// 余额缓存过期时间（秒），5 分钟
@@ -87,6 +88,24 @@ impl AdminService {
                 refresh_failure_count: entry.refresh_failure_count,
                 disabled_reason: entry.disabled_reason,
                 endpoint: entry.endpoint.unwrap_or_else(|| default_endpoint.clone()),
+                rate_limits: entry.rate_limits,
+                effective_rate_limits: entry.effective_rate_limits,
+                rate_limited: entry.rate_limited,
+                next_available_at: entry.next_available_at,
+                rate_limit_summary: entry.rate_limit_summary.map(|summary| RateLimitSummary {
+                    window: summary.window,
+                    max_requests: summary.max_requests,
+                    remaining_requests: summary.remaining_requests,
+                }),
+                rate_limit_summaries: entry
+                    .rate_limit_summaries
+                    .into_iter()
+                    .map(|summary| RateLimitSummary {
+                        window: summary.window,
+                        max_requests: summary.max_requests,
+                        remaining_requests: summary.remaining_requests,
+                    })
+                    .collect(),
             })
             .collect();
 
@@ -235,6 +254,7 @@ impl AdminService {
             disabled: false, // 新添加的凭据默认启用
             kiro_api_key: req.kiro_api_key,
             endpoint: req.endpoint,
+            rate_limits: req.rate_limits,
         };
 
         // 调用 token_manager 添加凭据
@@ -280,6 +300,13 @@ impl AdminService {
         }
     }
 
+    /// 获取全局默认限流规则
+    pub fn get_default_rate_limits(&self) -> DefaultRateLimitsResponse {
+        DefaultRateLimitsResponse {
+            default_rate_limits: self.token_manager.get_default_rate_limits(),
+        }
+    }
+
     /// 设置负载均衡模式
     pub fn set_load_balancing_mode(
         &self,
@@ -297,6 +324,29 @@ impl AdminService {
             .map_err(|e| AdminServiceError::InternalError(e.to_string()))?;
 
         Ok(LoadBalancingModeResponse { mode: req.mode })
+    }
+
+    /// 设置全局默认限流规则
+    pub fn set_default_rate_limits(
+        &self,
+        rate_limits: Option<Vec<crate::model::rate_limit::RateLimitRule>>,
+    ) -> Result<DefaultRateLimitsResponse, AdminServiceError> {
+        self.token_manager
+            .set_default_rate_limits(rate_limits)
+            .map_err(|e| AdminServiceError::InvalidCredential(e.to_string()))?;
+
+        Ok(self.get_default_rate_limits())
+    }
+
+    /// 设置凭据级限流规则
+    pub fn set_credential_rate_limits(
+        &self,
+        id: u64,
+        rate_limits: Option<Vec<crate::model::rate_limit::RateLimitRule>>,
+    ) -> Result<(), AdminServiceError> {
+        self.token_manager
+            .set_rate_limits(id, rate_limits)
+            .map_err(|e| self.classify_error(e, id))
     }
 
     /// 强制刷新指定凭据的 Token
@@ -448,7 +498,8 @@ impl AdminService {
         let msg = e.to_string();
         if msg.contains("不存在") {
             AdminServiceError::NotFound { id }
-        } else if msg.contains("只能删除已禁用的凭据") || msg.contains("请先禁用凭据") {
+        } else if msg.contains("只能删除已禁用的凭据") || msg.contains("请先禁用凭据")
+        {
             AdminServiceError::InvalidCredential(msg)
         } else {
             AdminServiceError::InternalError(msg)

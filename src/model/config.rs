@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::model::rate_limit::{RateLimitRule, validate_rate_limit_rules};
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum TlsBackend {
@@ -86,6 +88,11 @@ pub struct Config {
     /// Admin API 密钥（可选，启用 Admin API 功能）
     #[serde(default)]
     pub admin_api_key: Option<String>,
+
+    /// 全局默认限流规则（每个凭据的默认值）
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_rate_limits: Option<Vec<RateLimitRule>>,
 
     /// 负载均衡模式（"priority" 或 "balanced"）
     #[serde(default = "default_load_balancing_mode")]
@@ -180,6 +187,7 @@ impl Default for Config {
             proxy_username: None,
             proxy_password: None,
             admin_api_key: None,
+            default_rate_limits: None,
             load_balancing_mode: default_load_balancing_mode(),
             extract_thinking: default_extract_thinking(),
             default_endpoint: default_endpoint(),
@@ -219,6 +227,10 @@ impl Config {
 
         let content = fs::read_to_string(path)?;
         let mut config: Config = serde_json::from_str(&content)?;
+        validate_rate_limit_rules(
+            config.default_rate_limits.as_deref(),
+            "config.defaultRateLimits",
+        )?;
         config.config_path = Some(path.to_path_buf());
         Ok(config)
     }
@@ -236,7 +248,8 @@ impl Config {
             .ok_or_else(|| anyhow::anyhow!("配置文件路径未知，无法保存配置"))?;
 
         let content = serde_json::to_string_pretty(self).context("序列化配置失败")?;
-        fs::write(path, content).with_context(|| format!("写入配置文件失败: {}", path.display()))?;
+        fs::write(path, content)
+            .with_context(|| format!("写入配置文件失败: {}", path.display()))?;
         Ok(())
     }
 }

@@ -9,6 +9,7 @@ use std::path::Path;
 
 use crate::http_client::ProxyConfig;
 use crate::model::config::Config;
+use crate::model::rate_limit::{RateLimitRule, validate_rate_limit_rules};
 
 /// Kiro OAuth 凭证
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -97,6 +98,11 @@ pub struct KiroCredentials {
     #[serde(default)]
     pub disabled: bool,
 
+    /// 凭据级限流规则（可选，配置后整套替代全局默认值）
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limits: Option<Vec<RateLimitRule>>,
+
     /// Kiro API Key（headless 模式）
     /// 格式: ksk_xxxxxxxx
     /// 设置后直接作为 Bearer Token 使用，无需 refreshToken
@@ -162,6 +168,14 @@ impl CredentialsConfig {
         }
 
         let config = serde_json::from_str(&content)?;
+        match &config {
+            CredentialsConfig::Single(cred) => cred.validate("credentials")?,
+            CredentialsConfig::Multiple(creds) => {
+                for (idx, cred) in creds.iter().enumerate() {
+                    cred.validate(&format!("credentials[{idx}]"))?;
+                }
+            }
+        }
         Ok(config)
     }
 
@@ -272,6 +286,10 @@ impl KiroCredentials {
                 .map(|m| m.eq_ignore_ascii_case("api_key") || m.eq_ignore_ascii_case("apikey"))
                 .unwrap_or(false)
     }
+
+    pub fn validate(&self, source: &str) -> anyhow::Result<()> {
+        validate_rate_limit_rules(self.rate_limits.as_deref(), &format!("{source}.rateLimits"))
+    }
 }
 
 #[cfg(test)]
@@ -341,6 +359,7 @@ mod tests {
             proxy_username: None,
             proxy_password: None,
             disabled: false,
+            rate_limits: None,
             kiro_api_key: None,
             endpoint: None,
         };
@@ -459,6 +478,7 @@ mod tests {
             proxy_username: None,
             proxy_password: None,
             disabled: false,
+            rate_limits: None,
             kiro_api_key: None,
             endpoint: None,
         };
@@ -490,6 +510,7 @@ mod tests {
             proxy_username: None,
             proxy_password: None,
             disabled: false,
+            rate_limits: None,
             kiro_api_key: None,
             endpoint: None,
         };
@@ -604,6 +625,7 @@ mod tests {
             proxy_username: None,
             proxy_password: None,
             disabled: false,
+            rate_limits: None,
             kiro_api_key: None,
             endpoint: None,
         };
